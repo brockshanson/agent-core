@@ -1,0 +1,43 @@
+{{- /*
+   This file is managed by chezmoi. Edits to ~/.claude/CLAUDE.md will be
+   overwritten on the next `chezmoi apply`. Edit the source instead:
+     - Portable content : $(chezmoi source-path)/agent-core/AGENTS.core.md
+     - Fleet-only       : $(chezmoi source-path)/fleet/AGENTS.fleet.md
+     - Host-specific    : $(chezmoi source-path)/hosts/<hostname>/host.md
+     - Claude-only      : $(chezmoi source-path)/agent-core/CLAUDE.core.md
+*/ -}}
+{{/* Claude Code reads CLAUDE.md natively and supports @-path imports
+     with a max depth of 5 hops. We resolve the chezmoi source dir at
+     render time so the imports are absolute paths that Claude can load. */}}
+
+{{- /* Host doc lookup: the short host name comes from .chezmoitemplates/host-id
+     (why not .chezmoi.hostname is explained there). The lookup is stat-guarded
+     and falls back to hosts/_generic so an unregistered machine cannot
+     hard-fail apply. */ -}}
+{{- /* Fleet half (claude-dotfiles-6uo): infrastructure-coupled conventions.
+     Stat-guarded on purpose -- the public agent-core repo does not contain
+     this file, so the split gates by CONSTRUCTION rather than by a runtime
+     conditional. Absent file == absent infrastructure. */ -}}
+{{- $fleetCore := joinPath .chezmoi.sourceDir "fleet" "AGENTS.fleet.md" -}}
+{{- $host := includeTemplate "host-id" . | trim -}}
+{{- $hostDoc := joinPath .chezmoi.sourceDir "hosts" $host "host.md" -}}
+{{- if not (stat $hostDoc) -}}
+{{-   $hostDoc = joinPath .chezmoi.sourceDir "hosts" "_generic" "host.md" -}}
+{{- end -}}
+
+@{{ .chezmoi.sourceDir }}/agent-core/charter/charter.md
+
+@{{ .chezmoi.sourceDir }}/agent-core/AGENTS.core.md
+{{- if stat $fleetCore }}
+
+@{{ $fleetCore }}
+{{- end }}
+
+@{{ $hostDoc }}
+
+{{- /* Optionally import Claude-only extras if they exist on disk */}}
+{{- $claudeCore := joinPath .chezmoi.sourceDir "agent-core" "CLAUDE.core.md" -}}
+{{- if stat $claudeCore }}
+
+@{{ $claudeCore }}
+{{- end }}

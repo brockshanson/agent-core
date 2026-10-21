@@ -1,0 +1,17 @@
+# ~/.bash_profile — managed by chezmoi (source: dot_bash_profile.tmpl).
+#
+# bash reads .bash_profile for LOGIN shells and .bashrc for interactive
+# non-login shells — and NEITHER for a plain non-interactive script (that only
+# reads $BASH_ENV). Claude Code generates its shell snapshot from a LOGIN
+# shell, so this file is the one that has to pull in the real config.
+#
+# Standard pattern: keep everything in .bashrc, source it from here.
+#
+# bash reads only the FIRST of .bash_profile, .bash_login and .profile, so this
+# file existing means ~/.profile is no longer read on its own. Source it first,
+# because on Ubuntu/WSL it carries PATH and tool setup the machine already had.
+# Ubuntu's stock ~/.profile also sources ~/.bashrc; the guard stops a second
+# load.
+
+[ -f "$HOME/.profile" ] && . "$HOME/.profile"
+[ -f "$HOME/.bashrc" ] && [ -z "${__DOT_BASHRC_LOADED:-}" ] && . "$HOME/.bashrc"

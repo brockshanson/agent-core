@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# chezmoi modify_ script: merges the managed keys into the existing
+# ~/.claude/settings.json and leaves every other key alone.
+# stdin = the current file (empty on first run); stdout = the new file.
+#
+# Two sources: claude/settings.json.template (portable: no machine-specific
+# binary, no model pin, no other AI CLI, no MCP server) and, only where fleet/ exists, the
+# fleet overlay. The gate is resolved at render time, so a tree without fleet/
+# never wires hooks whose scripts it does not deliver.
+#
+# jq is a hard dependency; run_onchange_before_preflight-tools.sh checks for it
+# first, so a missing jq stops the apply before anything is written.
+
+set -euo pipefail
+
+TPL="{{ .chezmoi.sourceDir }}/claude/settings.json.template"
+{{ if stat (joinPath .chezmoi.sourceDir "fleet" "claude" "settings.fleet.json") -}}
+FLEET="{{ .chezmoi.sourceDir }}/fleet/claude/settings.fleet.json"
+{{ else -}}
+FLEET=""
+{{ end -}}
+
+INPUT=$(cat)
+
+# Merge the fleet overlay onto the portable base, if there is one. Hook trees
+# cannot use jq's `*` — that REPLACES arrays, silently dropping whichever half
+# it merged second. Concatenate per event, per matcher, instead. Overlay hooks
+# land AFTER the portable ones within a matcher.
+MERGE_HOOKS='
+  def addhooks($add):
+    reduce ($add | to_entries[]) as $ev (.;
+      .[$ev.key] = (
+        reduce ($ev.value[]) as $m ((.[$ev.key] // []);
+          if any(.[]; .matcher == $m.matcher)
+          then map(if .matcher == $m.matcher then .hooks += $m.hooks else . end)
+          else . + [$m] end)));
+'
+
+if [ -n "$FLEET" ]; then
+  DESIRED=$(jq -n --slurpfile base "$TPL" --slurpfile fleet "$FLEET" "$MERGE_HOOKS"'
+    ($fleet[0] | del(._comment)) as $f
+    | $base[0]
+    | .hooks          = ((.hooks // {}) | addhooks($f.hooks // {}))
+    | .enabledPlugins = ((.enabledPlugins // {}) * ($f.enabledPlugins // {}))
+    | .env            = ((.env // {}) * ($f.env // {}))
+    | .mcpServers     = ((.mcpServers // {}) * ($f.mcpServers // {}))
+    | .permissions.allow = ((.permissions.allow // []) + ($f.permissions.allow // []) | unique)
+  ')
+else
+  DESIRED=$(jq -n --slurpfile base "$TPL" '$base[0]')
+fi
+
+# First-run / empty target: never a raw cat
+# of the template. A verbatim cat leaves compact arrays that `chezmoi verify`
+# then recomputes through jq as pretty-printed, so verify exits 1 with ZERO
+# output until a second apply converges the formatting — indistinguishable
+# from a failed split on a clean box (claude-dotfiles-7iv, rehearsal F6).
+#
+# A first run goes through the same merge as every later run, from an empty
+# object, so the file it writes is already a fixed point of the merge: when a
+# first run printed $DESIRED directly, the next run (or chezmoi verify)
+# reordered keys and permissions and reported the file as changed.
+FIRST=false
+if [ -z "$INPUT" ] || [ "$INPUT" = "null" ]; then
+  INPUT='{}'
+  FIRST=true
+fi
+
+# Subsequent runs: keep live state, overlay only the managed keys.
+#
+# HOOKS are merged per event and matcher, not assigned. Assigning `.hooks =
+# $d.hooks` deleted every hook the user or another tool had added, on every
+# apply (portable-core red team, 2026-09-29, reproduced with a seeded foreign
+# PreToolUse hook). Deep-merging with `*` is also wrong: it keeps a retired
+# hook (pre-compact-handoff.py, 2026-09-28) wired to a deleted script. So:
+#   1. drop from the live hooks every command that is OURS: one that points
+#      into ~/.claude/hooks/ at a file that is missing or is a symlink into this
+#      source dir, plus any command the desired tree also carries;
+#   2. drop matchers and events left empty;
+#   3. add the desired hooks back with the same per-matcher merge as above.
+# A foreign hook, anything else, survives untouched.
+#
+# permissions.allow is a union. showThinkingSummaries and cleanupPeriodDays
+# are set only when the live file has no value, so a choice made on the
+# machine is not overwritten on every apply. cleanupPeriodDays: Claude Code
+# deletes transcripts older than this (default 30); 365 keeps the only record
+# that holds thinking and user text.
+SRC="{{ .chezmoi.sourceDir }}"
+OURS="[]"
+while IFS= read -r cmd; do
+  [ -n "$cmd" ] || continue
+  path=$(printf '%s\n' "$cmd" | grep -oE '~/\.claude/hooks/[^ "]+' | head -1) || true
+  [ -n "$path" ] || continue
+  full="$HOME/${path#\~/}"
+  if [ ! -e "$full" ] && [ ! -L "$full" ]; then
+    OURS=$(jq -c --arg c "$cmd" '. + [$c]' <<<"$OURS"); continue
+  fi
+  if [ -L "$full" ]; then
+    case "$(readlink "$full")" in "$SRC"/*) OURS=$(jq -c --arg c "$cmd" '. + [$c]' <<<"$OURS") ;; esac
+  fi
+done < <(printf '%s' "$INPUT" | jq -r '(.hooks // {})[][]?.hooks[]?.command // empty')
+
+# Env keys the PORTABLE template sets (log retention, account connectors off)
+# are filled in on every run when the machine has no value for them, so a
+# settings file that existed before the first apply still gets them; a value
+# already there always wins.
+BASEKEYS=$(jq -c '(.env // {}) | keys' "$TPL")
+printf '%s' "$INPUT" | jq --argjson d "$DESIRED" --argjson ours "$OURS" --argjson first "$FIRST" --argjson basekeys "$BASEKEYS" "$MERGE_HOOKS"'
+  ([$d.hooks[][]?.hooks[]?.command] + $ours) as $drop
+  | . * {
+      statusLine: $d.statusLine,
+      alwaysThinkingEnabled: $d.alwaysThinkingEnabled
+    }
+  | .hooks = (
+      (.hooks // {})
+      | map_values(
+          map(.hooks |= map(select(.command as $c | ($drop | index($c)) | not)))
+          | map(select((.hooks | length) > 0)))
+      | with_entries(select((.value | length) > 0))
+      | addhooks($d.hooks // {}))
+  | .permissions.allow = (((.permissions.allow // []) + ($d.permissions.allow // [])) | unique)
+  | if has("showThinkingSummaries") then . else .showThinkingSummaries = $d.showThinkingSummaries end
+  | if has("cleanupPeriodDays") or ($d.cleanupPeriodDays == null) then . else .cleanupPeriodDays = $d.cleanupPeriodDays end
+  | ((($d.env // {}) | with_entries(select(.key as $k | $basekeys | index($k)))) + (.env // {})) as $env
+  | if $env == {} then . else .env = $env end
+  # The rest of env, MCP servers and plugins are seeded on the FIRST run only,
+  # so removing one on the machine sticks.
+  | if $first then
+      reduce ("env", "mcpServers", "enabledPlugins") as $k (.;
+        if ($d[$k] // {}) == {} then . else .[$k] = ($d[$k] + (.[$k] // {})) end)
+    else . end
+'

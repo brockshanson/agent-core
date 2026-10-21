@@ -1,0 +1,82 @@
+# ~/.bashrc — managed by chezmoi (source: dot_bashrc.tmpl).
+#
+# THIS IS THE AGENT SHELL, NOT A HUMAN ONE. Claude Code snapshots the login
+# shell, so the login shell is bash; humans get zsh from the terminal. zsh does
+# not word-split unquoted expansions, and every recipe an agent writes assumes
+# bash does.
+#
+# KEEP THIS FILE LEAN. It is captured into every shell snapshot and re-sourced
+# on every Bash tool call. Interactive niceties belong in .zshrc.
+
+# --- Homebrew shellenv (sets PATH, MANPATH, INFOPATH, HOMEBREW_* vars) ---
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"         # Apple Silicon
+elif [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"            # Intel Mac
+fi
+
+# User-local binaries (chezmoi symlinks land here: open-diagram, release, and
+# whatever else the host delivers). Agents call these constantly — if this
+# line is missing, half the installed tooling silently "does not exist".
+export PATH="$HOME/.local/bin:$PATH"
+
+# --- Claude Code ---
+export CLAUDE_CODE_NO_FLICKER=1
+
+# --- Drop-in shell config (portable mechanism, wiring lives elsewhere) ---
+# Anything in ~/.config/shell/rc.d/*.sh is sourced in lexical order. The dir is
+# empty (or absent) on a machine with no infrastructure, so this names nothing
+# host-specific and costs nothing when there is nothing to source. Same .d/
+# idiom as ~/.tmux/status-extra.d/.
+for _rc in "$HOME/.config/shell/rc.d"/*.sh; do
+    [ -r "$_rc" ] && . "$_rc"
+done
+unset _rc
+
+# --- Per-repo env (direnv) ---
+# Agents cd into repos with .envrc constantly; without the hook they get the
+# bare environment and venv-dependent commands fail confusingly.
+command -v direnv >/dev/null && eval "$(direnv hook bash)"
+
+# --- glow: adaptive Flexoki theme (follows system light/dark) ---
+# Ported verbatim from .zshrc — it was already bash-compatible.
+if command -v glow >/dev/null; then
+    glow() {
+        local s=dark
+        if [[ "$OSTYPE" == darwin* ]]; then
+            defaults read -g AppleInterfaceStyle &>/dev/null || s=light
+        fi
+        command glow -s "$HOME/.config/glamour/flexoki-$s.json" "$@"
+    }
+fi
+
+# --- Host-specific shell config ---
+[ -f "$HOME/.shellrc.local" ] && source "$HOME/.shellrc.local"
+
+
+# =============================================================================
+# DELIBERATELY OMITTED — do not "restore for parity" with .zshrc
+# =============================================================================
+#
+# zoxide (`eval "$(zoxide init --cmd cd …)"`)
+#     .zshrc replaces `cd` with zoxide's fuzzy jump. In an AGENT shell that is
+#     an active hazard, not a convenience. Measured, not theorised:
+#
+#         $ cd w0            # no ./w0 in the current directory
+#         zsh  → rc=0, silently landed in ~/Projects/w0
+#         bash → rc=1, "No such file or directory"
+#
+#     An agent running `cd somedir && <destructive thing>` can therefore end up
+#     operating in a COMPLETELY DIFFERENT REPO, exit 0 the whole way. That is
+#     the "fails open, and it prints success" pathology AGENTS.core.md warns
+#     about, one layer below the recipes. Plain `cd` is the correct behaviour
+#     here. Humans keep zoxide in zsh, where a wrong jump is visible and cheap.
+#
+# starship, atuin, tmux auto-attach, bracketed-paste-magic, the direnv/legacy
+# -tool nudges, fzf-tab, zsh-abbr, autosuggestions, history-substring-search
+#     All interactive-only. A non-interactive shell has no prompt, no ZLE, and
+#     no preexec, so these are inert at best and snapshot bloat at worst.
+
+# Read by ~/.bash_profile so a ~/.profile that already sourced this file does
+# not cause a second load. Not exported: each shell decides for itself.
+__DOT_BASHRC_LOADED=1

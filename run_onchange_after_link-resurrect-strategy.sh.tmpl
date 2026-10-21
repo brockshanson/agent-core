@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Link the firstline save-command strategy into tmux-resurrect, once the plugin
+# is actually installed.
+#
+# WHY A SCRIPT AND NOT A SYMLINK TEMPLATE. The strategy used to be delivered as
+# dot_tmux/plugins/tmux-resurrect/save_command_strategies/symlink_firstline.sh.
+# On a fresh machine chezmoi created that path BEFORE TPM ran, so
+# ~/.tmux/plugins/tmux-resurrect/ already existed and TPM's git clone into it
+# failed; so did the "retry by hand" command it printed. The folder was there,
+# so `ls ~/.tmux/plugins` looked like a pass (found by the portable-core review,
+# 2026-09-28). Existing machines never saw it: their plugin was cloned first.
+#
+# run_onchange_after_, keyed the same way as install-tpm (tmux installed, the
+# DOTFILES_NO_NETWORK value), so it runs in the same apply that installs the
+# plugin and again when an offline machine first applies online. It must not
+# key on anything install-tpm creates: that left chezmoi verify at 1 until a
+# second apply. A plain run_after_ runs every apply and fails verify outright
+# (claude-dotfiles-7iv). After a manual plugin install, re-run by hand:
+#   ln -sfn "$(chezmoi source-path)/agent-core/tmux/resurrect-strategies/firstline.sh" \
+#     ~/.tmux/plugins/tmux-resurrect/save_command_strategies/firstline.sh
+# Idempotent. Never creates the plugin directory itself.
+#
+# key: tmux={{ if lookPath "tmux" }}yes{{ else }}no{{ end }} nonet={{ env "DOTFILES_NO_NETWORK" }}
+
+set -euo pipefail
+
+plugin="$HOME/.tmux/plugins/tmux-resurrect"
+src="{{ .chezmoi.sourceDir }}/agent-core/tmux/resurrect-strategies/firstline.sh"
+dst="$plugin/save_command_strategies/firstline.sh"
+
+if [ ! -d "$plugin/.git" ]; then
+  # A later plain apply does not rerun this; install-tpm's retry hint carries the link.
+  echo "link-resurrect-strategy: tmux-resurrect not installed yet — skipping; after installing it, link by hand:"
+  echo "  ln -sfn \"$src\" \"$dst\""
+  exit 0
+fi
+if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
+  exit 0
+fi
+ln -sfn "$src" "$dst"
+echo "link-resurrect-strategy: linked $dst"

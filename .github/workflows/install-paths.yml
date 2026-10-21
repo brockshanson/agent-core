@@ -1,0 +1,28 @@
+# Apply this repo in a clean Ubuntu 24.04 container five ways and fail on
+# anything a second apply would still change. See .github/scripts/install-paths.sh.
+#
+# Triggers on main only. The private source repo keeps its work on another
+# branch, so a copy of this file there never runs.
+name: install-paths
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install-paths:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [online, offline-online, tmux-later, upgrade, undo]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: ${{ matrix.scenario }}
+        run: .github/scripts/install-paths.sh "${{ matrix.scenario }}"

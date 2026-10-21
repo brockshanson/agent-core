@@ -1,0 +1,212 @@
+# chezmoi .chezmoiignore — patterns match destination (target) paths.
+#
+# Strategy: ignore everything at the repo root by default, then re-include
+# only the rendered-dotfile destinations we actually want chezmoi to manage.
+# Source content (agent-core/, hosts/) is referenced by templates via
+# absolute sourceDir path — it lives in the repo, not in $HOME.
+
+# Ignore all top-level entries by default.
+#
+# Patterns here are UNANCHORED — `*`, not `/*`; `!.claude`, not `!/.claude`.
+# chezmoi 2.72.0 rejects a leading slash outright ("invalid path") and refuses
+# to parse the file at all, so diff/apply/verify exit 1 having touched nothing.
+# 2.71.0 and earlier accepted both forms, which is why this went unnoticed until
+# a clean box installed the current release from get.chezmoi.io. Unanchored is
+# also what the fleet-gate block at the bottom already emits, so the whole file
+# now speaks one dialect. `*` does not cross `/`, so it still matches only
+# top-level entries.
+*
+
+# Re-include the dotfile destinations chezmoi should manage.
+!.claude
+!.codex
+!.gemini
+!.local
+!.tmux
+!.tmux.conf
+!.zshrc
+# .bashrc / .bash_profile are the AGENT shell, not a human one — the login
+# shell moves to bash so Claude Code's Bash tool runs bash (it snapshots the
+# LOGIN shell), while WezTerm still launches zsh for humans. See
+# claude-dotfiles-yme.9. Both must be listed here or the `*` rule above silently
+# swallows them.
+!.bashrc
+!.bash_profile
+!.gitconfig
+
+# .config/ root must be un-ignored for any nested .config symlinks to land.
+!.config
+
+# starship is portable across hosts.
+!.config/starship.toml
+
+# glamour stylesheets (Flexoki dark/light) are portable — the `glow` wrapper
+# in .zshrc selects between them per system appearance on every host.
+!.config/glamour
+
+# lazygit is portable across hosts.
+!.config/lazygit
+
+# direnv's global direnvrc. The directory is un-ignored unconditionally; whether
+# the file itself lands is decided by the fleet stat-gate further down.
+!.config/direnv
+
+# Shell rc drop-ins (~/.config/shell/rc.d/*.sh), sourced by both .zshrc and
+# .bashrc. The directory is un-ignored unconditionally — it is the portable
+# MECHANISM. Which drop-ins land is decided by the fleet stat-gates below.
+!.config/shell
+!.config/tmux
+
+# .config/wezterm/ stays darwin-only even though WezTerm is also the chosen
+# terminal on the Windows target (claude-dotfiles-yme.10). The gate is about
+# DELIVERY, not about the config being macOS-specific -- wezterm.lua branches
+# on wezterm.target_triple at runtime now and is portable.
+#
+# On the Windows box, chezmoi runs inside WSL, so .chezmoi.os is "linux" and
+# $HOME is the WSL home. Windows-native WezTerm reads %USERPROFILE%\.wezterm.lua
+# or %USERPROFILE%\.config\wezterm\ -- and will not follow a symlink living on
+# the WSL filesystem. Un-ignoring this for linux would therefore materialize a
+# symlink nothing reads, which is exactly what this gate exists to prevent.
+# Delivering to the Windows side needs a copy or WEZTERM_CONFIG_FILE; decide
+# that when the box exists, not speculatively. Headless linux hosts run no GUI
+# terminal at all.
+{{- if eq .chezmoi.os "darwin" }}
+!.config/wezterm
+{{- end }}
+
+# glow.yml lives under ~/Library/Preferences on macOS (glow's config dir there);
+# manage it darwin-only. Linux hosts get glow config via XDG, but the wrapper +
+# glamour symlinks above already cover interactive use, so no linux glow.yml.
+{{- if eq .chezmoi.os "darwin" }}
+!Library
+!Library/Preferences
+!Library/Preferences/glow
+{{- end }}
+
+# Re-include chezmoi's own root metadata files.
+!.chezmoi*
+
+# Re-include chezmoi run-script targets at the root.
+# (Run scripts have a virtual target name = source name minus run_*_ prefix
+#  and .tmpl suffix; patterns match that target name, not the source name.)
+#
+# EVERY run_* source file must appear here, or it is silently never executed —
+# chezmoi does not report an ignored source file. Four were missing for months
+# (claude-dotfiles-yme.1). `bin/chezmoi-run-audit` asserts this list is total,
+# and .githooks/pre-commit runs it automatically whenever a commit stages a
+# run_* script or this file — so an omission now blocks the commit instead of
+# waiting to be noticed (claude-dotfiles-xp2).
+!preflight-tools.sh
+!install-tpm.sh
+!link-resurrect-strategy.sh
+!install-tmux-deps-darwin.sh
+!install-root-ca.sh
+!cleanup-stale-symlinks.sh
+!ensure-codex-doc-budget.sh
+
+# --- fleet-coupled run scripts: re-included ONLY when fleet/ is present ------
+# These clone a personal repo, set codex network_access=true, or sync MCP servers
+# pointed at a homelab endpoint (claude-dotfiles-51q).
+#
+# They are gated by WITHHOLDING the re-include, not by adding an ignore. A `!`
+# negation wins over any later ignore pattern regardless of order — the same
+# defect 5q7 found for recursive `!path/**`, and it holds for run-script target
+# names too. So "re-include always, ignore when fleetless" silently fails open;
+# measured, not assumed.
+{{- if stat (joinPath .chezmoi.sourceDir "fleet" "README.md") }}
+!install-colloquy.sh
+!ensure-codex-colloquy-hooks.sh
+!ensure-codex-colloquy-network.sh
+{{- end }}
+{{- if stat (joinPath .chezmoi.sourceDir "fleet" "mcp" "sync.sh") }}
+!mcp-sync.sh
+{{- end }}
+# ---------------------------------------------------------------------------
+
+
+# --- fleet-coupled DELIVERY, gated by construction (eqv, 5q7, 51q) ----------
+# agent-core/ is the half bound for the public portable-core repo; fleet/ is the
+# half that must never travel. Delete fleet/ and every delivery below disappears
+# with it — no conditional to remember to flip, no profile flag to set wrong.
+#
+# Note the INVERTED sense: .chezmoiignore lists what to EXCLUDE, so an entry is
+# emitted when its fleet/ source is MISSING.
+#
+# Two gate shapes, because two coupling shapes exist:
+#
+#   A. OWN-SOURCE — the delivery's source file lives in fleet/, so it stat-gates
+#      on itself. Deleting fleet/ removes source and gate together. Preferred:
+#      the gate cannot disagree with reality.
+#
+#   B. SENTINEL — the delivery points OUTSIDE the repo (~/Projects/colloquy,
+#      ~/Projects/palimpsest) or is a dot_* template that must live in its
+#      destination tree, so there is no fleet/ source to stat. These gate on
+#      fleet/README.md as a proxy for "fleet/ exists at all". Weaker: the gate
+#      is a convention, not a construction, so bin/chezmoi-gate-audit asserts
+#      the list stays complete.
+#
+# Destinations, not source names — and run scripts match on their VIRTUAL target
+# name (source minus the run_*_ prefix and .tmpl suffix), which is why the
+# entries below read as bare .sh names (claude-dotfiles-yme.1).
+
+{{- $src := .chezmoi.sourceDir }}
+
+{{/* --- Shape A: gated on their own fleet/ source ------------------------- */}}
+{{- $ownSource := list
+      (dict "src" "fleet/tmux/status-extra.d/10-colloquy" "dst" ".tmux/status-extra.d/10-colloquy")
+      (dict "src" "fleet/direnv/direnvrc"                 "dst" ".config/direnv/direnvrc")
+      (dict "src" "fleet/shell/rc.d/10-colloquy.sh"       "dst" ".config/shell/rc.d/10-colloquy.sh")
+      (dict "src" "fleet/shell/rc.d/90-claude-mcp-env.sh" "dst" ".config/shell/rc.d/90-claude-mcp-env.sh")
+      (dict "src" "fleet/tmux/fleet.conf"                 "dst" ".config/tmux/fleet.conf")
+      (dict "src" "fleet/bin/agent-file-audit"          "dst" ".local/bin/agent-file-audit")
+      (dict "src" "fleet/bin/bd-backend-check"            "dst" ".local/bin/bd-backend-check")
+      (dict "src" "fleet/bin/bd-census"                   "dst" ".local/bin/bd-census")
+      (dict "src" "fleet/bin/bd-config-audit"             "dst" ".local/bin/bd-config-audit")
+      (dict "src" "fleet/bin/bd-guard"                    "dst" ".local/bin/bd-guard")
+      (dict "src" "fleet/bin/bd-init-lean"                "dst" ".local/bin/bd-init-lean")
+      (dict "src" "fleet/bin/bd-prime-hook"               "dst" ".local/bin/bd-prime-hook")
+      (dict "src" "fleet/bin/bd-stale"                    "dst" ".local/bin/bd-stale")
+      (dict "src" "fleet/bin/bd-strip-block"              "dst" ".local/bin/bd-strip-block")
+      (dict "src" "fleet/bin/bd-sync"                     "dst" ".local/bin/bd-sync")
+      (dict "src" "fleet/bin/lituus-mcp-stdio"            "dst" ".local/bin/lituus-mcp-stdio")
+      (dict "src" "fleet/mcp/sync.sh"                     "dst" ".local/bin/mcp-sync")
+      (dict "src" "fleet/claude/hooks/colloquy-briefing.sh"      "dst" ".claude/hooks/colloquy-briefing.sh")
+      (dict "src" "fleet/claude/hooks/colloquy-env.sh"           "dst" ".claude/hooks/colloquy-env.sh")
+      (dict "src" "fleet/claude/hooks/colloquy-recap-nudge.sh"   "dst" ".claude/hooks/colloquy-recap-nudge.sh")
+      (dict "src" "fleet/claude/hooks/beads-claim-convention.py" "dst" ".claude/hooks/beads-claim-convention.py")
+      (dict "src" "fleet/claude/hooks/colloquy-briefing.sh"      "dst" ".gemini/hooks/colloquy-briefing.sh")
+      (dict "src" "fleet/codex/fleet.rules"            "dst" ".codex/rules/fleet.rules")
+      (dict "src" "fleet/claude/workflows/fleet-config-hygiene.js" "dst" ".claude/workflows/fleet-config-hygiene.js")
+      (dict "src" "fleet/codex/skills/beads-workflow"     "dst" ".codex/skills/beads-workflow")
+      (dict "src" "fleet/tmux/layouts/beads-tui.sh"       "dst" ".tmux/layouts/beads-tui.sh")
+      (dict "src" "fleet/design/taste.md"                 "dst" ".config/agent-design/taste.md")
+      (dict "src" "fleet/design/output.md"                "dst" ".config/agent-design/output.md")
+}}
+{{- range $ownSource }}
+{{- if not (stat (joinPath $src .src)) }}
+{{ .dst }}
+{{- end }}
+{{- end }}
+
+{{/* --- Shape B: no fleet/ source to stat; gated on the fleet/ sentinel ----
+     .local/bin/colloquy{,d}      -> ~/Projects/colloquy      (out of tree)
+     .local/bin/review-{gate,bridge} + .claude/skills/palimpsest
+                                  -> ~/Projects/palimpsest    (out of tree)
+       NOTE: review-gate is atom #1 of the portability plan and is SUPPOSED to
+       travel eventually. Gating it here is correct only while its delivery is a
+       symlink into a repo a portable machine will not have; a real palimpsest
+       delivery replaces this entry rather than un-gating it (yme.3).
+     .gemini/config/mcp_config.json -> carries a home MCP endpoint; the template
+       must live under dot_gemini/, so it cannot be moved into fleet/.
+     install-colloquy.sh / ensure-codex-colloquy-*.sh -> clone a personal repo
+       and set codex network_access=true (claude-dotfiles-51q).
+  --------------------------------------------------------------------- */}}
+{{- if not (stat (joinPath $src "fleet" "README.md")) }}
+.local/bin/colloquy
+.local/bin/colloquyd
+.local/bin/review-gate
+.local/bin/review-bridge
+.claude/skills/palimpsest
+.gemini/config/mcp_config.json
+{{- end }}
+# ---------------------------------------------------------------------------

@@ -1,0 +1,46 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/bash
+# One-shot (macOS only): install tmux-layout dependencies that the home server already
+# has baked into its Debian stack. Layouts call lf + fzf; glow is a nice-to-have
+# markdown pager; starship powers the prompt the home server uses inline in .bashrc.
+# bat is typically already installed at bootstrap.
+
+set -euo pipefail
+
+if ! command -v brew >/dev/null 2>&1; then
+    echo "Homebrew missing — cannot install tmux deps. Skipping."
+    exit 0
+fi
+
+DEPS=(lf fzf glow starship)
+MISSING=()
+for pkg in "${DEPS[@]}"; do
+    if ! brew list --formula --versions "$pkg" >/dev/null 2>&1; then
+        MISSING+=("$pkg")
+    fi
+done
+
+if [ ${#MISSING[@]} -eq 0 ]; then
+    echo "tmux deps already installed: ${DEPS[*]}"
+    exit 0
+fi
+
+# claude-dotfiles-cdc: `brew install` downloads bottles from the network.
+# $DOTFILES_NO_NETWORK=1 is the repo-wide opt-out -- announced skip, non-fatal.
+if [ -n "${DOTFILES_NO_NETWORK:-}" ]; then
+    echo "tmux deps: DOTFILES_NO_NETWORK is set — skipping install of: ${MISSING[*]}"
+    echo "  run by hand when the network permits:  brew install ${MISSING[*]}"
+    exit 0
+fi
+
+echo "tmux deps: NETWORK — installing via Homebrew (downloads bottles): ${MISSING[*]}"
+echo "  set DOTFILES_NO_NETWORK=1 to skip network-reaching bootstrap steps."
+# Non-fatal: these are conveniences the tmux layouts call, not targets chezmoi
+# must produce. An apply that aborts over a missing `glow` would be its own bug.
+if ! brew install "${MISSING[@]}"; then
+    echo "tmux deps: WARNING — brew install FAILED for: ${MISSING[*]}" >&2
+    echo "  the tmux layouts that call these will print 'command not found' until fixed." >&2
+    echo "  retry by hand:  brew install ${MISSING[*]}" >&2
+    exit 0
+fi
+{{- end -}}

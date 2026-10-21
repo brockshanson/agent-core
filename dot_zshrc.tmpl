@@ -1,0 +1,208 @@
+# ~/.zshrc — managed by chezmoi (source: dot_zshrc.tmpl in claude-dotfiles).
+#
+# The human shell: starship prompt, zinit plugins (cloned on first launch,
+# announced), zoxide, atuin. Machine-specific lines go in ~/.shellrc.local.
+
+# --- Homebrew shellenv (sets PATH, MANPATH, INFOPATH, HOMEBREW_* vars) ---
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"         # Apple Silicon
+elif [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"            # Intel Mac
+fi
+
+# User-local binaries (chezmoi symlinks land here: open-diagram, release, …)
+export PATH="$HOME/.local/bin:$PATH"
+
+# --- Claude Code ---
+# Flicker-free alt-screen rendering during streaming tool output.
+export CLAUDE_CODE_NO_FLICKER=1
+
+# --- Drop-in shell config (portable mechanism, wiring lives elsewhere) ---
+# Anything in ~/.config/shell/rc.d/*.sh is sourced in lexical order. The dir is
+# empty (or absent) on a machine with no infrastructure, so this names nothing
+# host-specific and costs nothing when there is nothing to source. Same .d/
+# idiom as ~/.tmux/status-extra.d/.
+for _rc in "$HOME/.config/shell/rc.d"/*.sh; do
+    [ -r "$_rc" ] && . "$_rc"
+done
+unset _rc
+
+# --- Prompt ---
+command -v starship >/dev/null && eval "$(starship init zsh)"
+
+# --- tmux auto-attach on SSH ---
+# Mirrors the home server's .bashrc: incoming SSH sessions land in a persistent `main`
+# tmux, so Termius/mobile connections resume across drops.
+if [ -z "$TMUX" ] && [ -n "$SSH_CONNECTION" ]; then
+    tmux attach -t main 2>/dev/null || tmux new -s main
+fi
+
+# --- Key bindings ---
+# Opt-as-Alt is enabled in wezterm, so Option arrows emit Meta sequences.
+bindkey '^[[1;3D' backward-word       # Opt+Left
+bindkey '^[[1;3C' forward-word        # Opt+Right
+bindkey '^[^?'    backward-kill-word  # Opt+Backspace
+
+# --- Plugin manager (zinit) ---
+# Auto-clones on first run, announced first; DOTFILES_NO_NETWORK=1, missing git
+# or offline → block is skipped cleanly and says so once.
+# Order: fzf-tab (completion UI) → zsh-abbr (fish-style abbrev) →
+# zsh-autosuggestions (ghost text) → you-should-use (alias/abbr nudges; before
+# FSH so its widgets get highlighted) → fast-syntax-highlighting (must be near
+# last so it wraps the ZLE widgets of what came before) → history-substring-
+# search (wants to come after FSH). atuin init below re-binds Up/Ctrl-R and
+# intentionally wins those keys over zsh-history-substring-search.
+ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+if [ ! -d "$ZINIT_HOME" ] && command -v git >/dev/null; then
+    if [ -n "${DOTFILES_NO_NETWORK:-}" ]; then
+        print -u2 "zinit: not installed; DOTFILES_NO_NETWORK is set, skipping clone of github.com/zdharma-continuum/zinit"
+    else
+        print -u2 "zinit: first run — cloning github.com/zdharma-continuum/zinit (plugins follow from github.com)"
+        git clone --depth=1 https://github.com/zdharma-continuum/zinit.git "$ZINIT_HOME" 2>/dev/null \
+            || print -u2 "zinit: clone failed (offline or filtered); plugins skipped this shell"
+    fi
+fi
+if [ -f "${ZINIT_HOME}/zinit.zsh" ]; then
+    source "${ZINIT_HOME}/zinit.zsh"
+
+    # compinit must run before fzf-tab loads (fzf-tab README is explicit).
+    # -C skips the security check on ~/.zcompdump for faster startup.
+    autoload -Uz compinit && compinit -C
+
+    zinit light Aloxaf/fzf-tab
+    zinit light olets/zsh-abbr
+    zinit light zsh-users/zsh-autosuggestions
+    zinit light MichaelAquilina/zsh-you-should-use
+    zinit light zdharma-continuum/fast-syntax-highlighting
+    zinit light zsh-users/zsh-history-substring-search
+
+    # Replay compdefs queued by zinit plugins after compinit.
+    zinit cdreplay -q
+
+    # CLI-specific completions that ship inside the binary itself
+    # (carapace doesn't cover these niche/homelab tools).
+    command -v bd       >/dev/null && eval "$(bd completion zsh)"
+    command -v chezmoi  >/dev/null && eval "$(chezmoi completion zsh)"
+fi
+
+# --- fzf keybindings ---
+# Ctrl-T pastes fzf-selected files into the command line; Alt-C cd's via fzf.
+# Atuin's init below claims Ctrl-R; fzf's completion (**<TAB>) is unaffected.
+if [ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]; then
+    source /usr/share/doc/fzf/examples/key-bindings.zsh
+    [ -f /usr/share/doc/fzf/examples/completion.zsh ] && source /usr/share/doc/fzf/examples/completion.zsh
+elif command -v brew >/dev/null 2>&1 && [ -d "$(brew --prefix 2>/dev/null)/opt/fzf/shell" ]; then
+    source "$(brew --prefix)/opt/fzf/shell/key-bindings.zsh"
+    source "$(brew --prefix)/opt/fzf/shell/completion.zsh"
+fi
+
+# --- fzf-git.sh — Ctrl-G chord for git pickers ---
+# Ctrl-G then: f (files) · b (branches) · t (tags) · h (hashes) · r (remotes)
+# s (stashes) · l (reflog) · w (worktrees). Download on a new host with:
+#   mkdir -p ~/.local/share/fzf-git.sh && \
+#   curl -sL https://raw.githubusercontent.com/junegunn/fzf-git.sh/main/fzf-git.sh \
+#     -o ~/.local/share/fzf-git.sh/fzf-git.sh
+[ -f "$HOME/.local/share/fzf-git.sh/fzf-git.sh" ] && source "$HOME/.local/share/fzf-git.sh/fzf-git.sh"
+
+# --- Universal completions (carapace) ---
+# Completions for 1000+ CLIs (kubectl, docker, gh, aws, …) that the zsh
+# stdlib doesn't ship. Bridges to zsh/fish/bash completions so it augments
+# rather than replaces.
+if command -v carapace >/dev/null; then
+    export CARAPACE_BRIDGES='zsh,fish,bash'
+    zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
+    source <(carapace _carapace)
+fi
+
+# --- Shell history (atuin) ---
+# Local-only today; self-hosted sync server is a separate bead.
+# Rebinds Up + Ctrl-R to the atuin TUI search (fuzzy, scoped, annotated).
+# Must init AFTER zinit so atuin beats zsh-history-substring-search for Up.
+command -v atuin >/dev/null && eval "$(atuin init zsh)"
+
+# --- Per-repo env (direnv) ---
+# Hooks precmd: on entering a dir with an .envrc (and `direnv allow` granted),
+# loads repo-scoped env vars, activates venvs, etc. Canonical .envrc templates
+# live in agent-core/direnv/.
+command -v direnv >/dev/null && eval "$(direnv hook zsh)"
+
+# --- Bracketed-paste safety ---
+# Without this, pasting multi-line text with embedded newlines can fire
+# partial commands immediately. bracketed-paste-magic wraps the widget
+# so pasted content stays quoted until the user explicitly hits Enter.
+autoload -Uz bracketed-paste-magic
+zle -N bracketed-paste bracketed-paste-magic
+
+# --- Project .envrc nudge (once per session per path; doesn't block) ---
+# When you cd into a ~/Projects/<repo>/ that is a git repo but has no .envrc,
+# print a one-line pointer to the bootstrap script. Same stop-sign philosophy
+# as the legacy-tool nudge below — prints once and gets out of the way.
+typeset -ga _direnv_nudged
+_direnv_project_nudge() {
+    [[ "$PWD" != "$HOME/Projects/"* ]] && return
+    [[ "$PWD" == "$HOME/Projects" ]] && return
+    [[ -d "$PWD/.git" ]] || return
+    [[ -f "$PWD/.envrc" ]] && return
+    (( ${_direnv_nudged[(Ie)$PWD]} )) && return
+    _direnv_nudged+=("$PWD")
+    print -u2 "  -> no .envrc here. scaffold one with: direnv-bootstrap-projects $PWD"
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _direnv_project_nudge
+
+# --- Legacy-tool nudges (once per session per tool; doesn't block) ---
+# Stop-sign style: runs the classic command as normal, but prints a one-line
+# pointer the first time per session. Interactive-only (preexec doesn't fire
+# in scripts). See AGENTS.core.md § Preferred CLI tools for the full list.
+autoload -Uz add-zsh-hook
+typeset -ga _nudged_tools
+_legacy_tool_nudge() {
+    local verb="${1%% *}"
+    case "$verb" in (grep|find|ls|cat|sed) ;; (*) return ;; esac
+    (( ${_nudged_tools[(Ie)$verb]} )) && return
+    _nudged_tools+=("$verb")
+    case "$verb" in
+        grep) print -u2 "  -> try 'rg' — parallel, gitignore-aware, prettier output" ;;
+        find) print -u2 "  -> try 'fd pat' — no '-name' dance, git-aware" ;;
+        ls)   print -u2 "  -> try 'eza -l --git' — git status column, colors, tree with -T" ;;
+        cat)  print -u2 "  -> try 'bat' — syntax highlighting + line numbers" ;;
+        sed)  print -u2 "  -> try 'sd' for simple substitutions — sane regex, no -i OS split" ;;
+    esac
+}
+add-zsh-hook preexec _legacy_tool_nudge
+
+# --- glow: adaptive Flexoki theme (follows system light/dark) ---
+# glow's config takes a single static `style`, but the rest of the rig
+# (WezTerm, tmux) switches Flexoki dark<->light on the macOS appearance
+# toggle. Mirror that by selecting the matching glamour stylesheet per
+# invocation. Stylesheets are chezmoi-symlinked to ~/.config/glamour/.
+# Detection: on macOS, AppleInterfaceStyle exists only in Dark mode; on
+# non-darwin hosts there's no system toggle, so default to dark.
+if command -v glow >/dev/null; then
+    glow() {
+        local s=dark
+        if [[ "$OSTYPE" == darwin* ]]; then
+            defaults read -g AppleInterfaceStyle &>/dev/null || s=light
+        fi
+        command glow -s "$HOME/.config/glamour/flexoki-$s.json" "$@"
+    }
+fi
+
+# --- Host-specific shell config ---
+# Per-machine bits that don't belong in the cross-host template: paths to
+# host-installed toolchains, host-specific daemons, personal scripts dirs.
+# No-op on hosts where ~/.shellrc.local doesn't exist.
+[ -f "$HOME/.shellrc.local" ] && source "$HOME/.shellrc.local"
+
+
+# --- Directory jump (zoxide) — keep at the very end ---
+# Init goes last so zoxide's chpwd hook isn't shadowed by direnv / the
+# chpwd nudges above. _ZO_DOCTOR=0 silences zoxide's "configuration issue"
+# notice: in non-interactive tool shells (e.g. Claude Code's Bash tool)
+# chpwd_functions ends up empty, so the doctor fires on every `cd`-leading
+# command. It's cosmetic — interactive shells still register the hook and
+# track normally; the ephemeral tool shells don't need tracking.
+# --cmd cd replaces plain cd: exact paths still work, otherwise fuzzy-jump
+# to the best-ranked recent dir. `cdi` launches an fzf picker.
+export _ZO_DOCTOR=0
+command -v zoxide >/dev/null && eval "$(zoxide init --cmd cd zsh)"

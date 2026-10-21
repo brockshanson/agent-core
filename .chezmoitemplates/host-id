@@ -1,0 +1,31 @@
+{{- /* host-id: the ONE place the fleet decides which machine this is.
+     Renders the short, lowercased host name used to pick hosts/<name>/host.md
+     and to gate per-host run scripts. Consume with:
+         {{ $host := includeTemplate "host-id" . | trim }}
+
+     WHY NOT .chezmoi.hostname (claude-dotfiles-rhc, and the 2026-09-19 repeat):
+     on macOS chezmoi does not report the kernel hostname. It resolves
+     fqdnHostname by reverse-looking-up 127.0.0.1 and takes the first label, so
+     a single `127.0.0.1 some.name` line in /etc/hosts -- a dev-server alias, a
+     tenant POC, an MDM artefact -- renames the machine as far as every template
+     is concerned. The stat-guarded fallback then swaps in hosts/_generic and
+     apply reports success. On 2026-09-19 that is exactly what happened on
+     one fleet laptop: a leftover POC hosts line made every agent doc render against
+     the generic host doc while `scutil`, `uname -n` and `hostname` all still
+     still agreed on the real name. Fail-open, printed success.
+
+     So on darwin ask the system-configuration name, which is what the owner set
+     in Sharing/`scutil --set HostName`, and which nothing on the network can
+     move. Elsewhere os.Hostname() is the kernel name and is fine.
+
+     .hostid, when present in data, wins outright. bin/portable-gate passes it
+     via --override-data to render as a neutral box on a fleet host. */ -}}
+{{- $raw := "" -}}
+{{- if hasKey . "hostid" -}}
+{{-   $raw = .hostid -}}
+{{- else if eq .chezmoi.os "darwin" -}}
+{{-   $raw = output "sh" "-c" "scutil --get HostName 2>/dev/null || scutil --get LocalHostName 2>/dev/null || uname -n" -}}
+{{- else -}}
+{{-   $raw = .chezmoi.hostname -}}
+{{- end -}}
+{{- splitList "." (lower (trim $raw)) | first -}}

@@ -1,0 +1,7 @@
+# Session transcripts and hook logs written by agents run from inside this tree.
+.claude-logs/
+# Local, never-committed state.
+.env
+*.local.json
+__pycache__/
+.DS_Store

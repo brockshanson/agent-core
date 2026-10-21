@@ -1,0 +1,35 @@
+# lazygit config — managed by chezmoi.
+# Source: agent-core/lazygit/config.yml. Fan-out via
+# dot_config/lazygit/symlink_config.yml.tmpl.
+# Full reference: https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md
+
+git:
+  # Route lazygit's diff view through delta so it matches `git diff` output
+  # in the terminal. `--paging=never` is required — lazygit paginates itself.
+  paging:
+    colorArg: always
+    pager: "delta --paging=never"
+
+  # Always show graph lines in the commit log view.
+  log:
+    showGraph: always
+
+gui:
+  # Assumes a Nerd Font v3 is installed (I use Monaspace, via
+  # `brew install --cask font-monaspace` on macOS). If yours is older, set
+  # "2"; if you have no Nerd Font at all, remove this line.
+  nerdFontsVersion: "3"
+
+  # Quieter UI: hide the command-history strip at the bottom of the window.
+  showCommandLog: false
+
+  # Colors reference terminal palette slots so Flexoki light/dark auto-flip
+  # in the terminal emulator keeps working without config changes here.
+  theme:
+    activeBorderColor:
+      - blue
+      - bold
+    inactiveBorderColor:
+      - default
+    selectedLineBgColor:
+      - reverse

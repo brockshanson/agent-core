@@ -1,0 +1,79 @@
+# starship prompt — portable across hosts (managed by chezmoi).
+#
+# Design notes:
+#   - Single-line prompt; git info lives on the right.
+#   - Hostname only shows over SSH (local sessions: redundant).
+#   - Language/env modules trigger on detect — we disable python explicitly
+#     because ambient venvs make it near-always-on and noisy.
+#   - Colors reference terminal palette slots (bold/dimmed + basic names)
+#     so Flexoki light/dark auto-flip in wezterm stays coherent.
+
+add_newline = false
+command_timeout = 1000
+
+format = """\
+$username\
+$hostname\
+$directory\
+$character\
+"""
+
+right_format = """\
+$cmd_duration\
+$git_branch\
+$git_status\
+$git_state\
+"""
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+vicmd_symbol = "[❮](bold green)"
+
+[username]
+show_always = false
+format = "[$user]($style)@"
+style_user = "dimmed yellow"
+style_root = "bold red"
+
+[hostname]
+ssh_only = true
+format = "[$hostname]($style) "
+style = "bold blue"
+
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+style = "bold cyan"
+
+[git_branch]
+symbol = " "
+style = "dimmed green"
+format = "[$symbol$branch]($style) "
+
+[git_status]
+style = "dimmed yellow"
+format = "[\\[$all_status$ahead_behind\\]]($style) "
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇡${ahead_count}⇣${behind_count}"
+conflicted = "="
+untracked = "?"
+modified = "!"
+staged = "+"
+renamed = "»"
+deleted = "✘"
+stashed = "\\$"
+
+[git_state]
+style = "bold red"
+format = "\\($state( $progress_current/$progress_total)\\) "
+
+[cmd_duration]
+min_time = 2000
+format = "[$duration](bold yellow) "
+show_milliseconds = false
+
+# Explicitly disabled — ambient venvs make it near-always-visible noise.
+[python]
+disabled = true

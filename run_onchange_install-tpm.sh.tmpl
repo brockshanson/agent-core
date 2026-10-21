@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Install TPM (tmux plugin manager) and the plugins declared in
+# agent-core/tmux/tmux.conf.
+#
+# run_onchange_, keyed on tmux presence and DOTFILES_NO_NETWORK. A run_once_
+# that skips still counts as its one run, so an offline first apply never got
+# TPM. Never key on anything this script creates, or verify reports it pending.
+#
+# key: tmux={{ if lookPath "tmux" }}yes{{ else }}no{{ end }} nonet={{ env "DOTFILES_NO_NETWORK" }}
+#
+# No tmux, no TPM. The host and URL are announced before any clone, and
+# DOTFILES_NO_NETWORK=1 skips it. Failures are reported with the command that
+# finishes the job, but never fail the apply: TPM is a convenience. TPM's
+# install_plugins exits 0 on a partial install, so its output is scanned too.
+#
+# Every by-hand retry ends with the resurrect-strategy link. That script runs
+# right after this one and skips while the plugin is missing, and a plain
+# `chezmoi apply` does not run it again: run_onchange reruns only when a
+# script's content or key changes, not because an earlier run skipped.
+
+set -euo pipefail
+
+TPM_DIR="$HOME/.tmux/plugins/tpm"
+TPM_URL="https://github.com/tmux-plugins/tpm"
+TPM_HOST="${TPM_URL#https://}"; TPM_HOST="${TPM_HOST%%/*}"
+RESURRECT_LINK="ln -sfn \"{{ .chezmoi.sourceDir }}/agent-core/tmux/resurrect-strategies/firstline.sh\" $HOME/.tmux/plugins/tmux-resurrect/save_command_strategies/firstline.sh"
+say() { printf 'install-tpm: %s\n' "$@"; }
+warn() { printf 'install-tpm: %s\n' "$@" >&2; }
+
+# --- 1. tmux present? -------------------------------------------------------
+if ! command -v tmux >/dev/null 2>&1; then
+    say "tmux is not installed on this host — skipping TPM."
+    say "  nothing was cloned and no network was contacted."
+    say "  install tmux, then run chezmoi apply: the tmux key changes, so this runs again."
+    exit 0
+fi
+
+# --- 2. clone, announced ----------------------------------------------------
+if [ ! -d "$TPM_DIR/.git" ]; then
+    if [ -n "${DOTFILES_NO_NETWORK:-}" ]; then
+        say "DOTFILES_NO_NETWORK is set — skipping the outbound clone of TPM."
+        say "  would have cloned: $TPM_URL -> $TPM_DIR"
+        say "  the next apply without DOTFILES_NO_NETWORK does it, or by hand:"
+        say "    git clone --depth=1 $TPM_URL $TPM_DIR && \"$TPM_DIR/bin/install_plugins\" && $RESURRECT_LINK"
+        exit 0
+    fi
+    say "NETWORK: about to clone the tmux plugin manager over HTTPS."
+    say "  host: $TPM_HOST"
+    say "  from: $TPM_URL"
+    say "  into: $TPM_DIR"
+    say "  set DOTFILES_NO_NETWORK=1 to skip network-reaching bootstrap steps."
+    # Clone into a sibling temp dir and move it into place, so a failed or
+    # interrupted clone cannot leave a half-populated $TPM_DIR behind: on the
+    # failure path the staging dir is removed and $TPM_DIR is left exactly as
+    # it was. We only reach here when $TPM_DIR has no .git, so replacing it on
+    # SUCCESS discards a non-git remnant -- which is the intent.
+    mkdir -p "$(dirname "$TPM_DIR")"
+    staging="${TPM_DIR}.incoming.$$"
+    rm -rf "$staging"
+    if ! git clone --depth=1 "$TPM_URL" "$staging"; then
+        rm -rf "$staging"
+        warn "WARNING: clone FAILED — $TPM_HOST unreachable, or egress filtered."
+        warn "  TPM is NOT installed. tmux still works; plugins are absent."
+        warn "  finish this by hand once the network permits:"
+        warn "    git clone --depth=1 $TPM_URL $TPM_DIR && \"$TPM_DIR/bin/install_plugins\" && $RESURRECT_LINK"
+        exit 0
+    fi
+    rm -rf "$TPM_DIR"
+    mv "$staging" "$TPM_DIR"
+    say "clone OK."
+else
+    say "TPM already present at $TPM_DIR — skipping clone."
+fi
+
+# --- 3. seed plugins, reporting partial failure honestly --------------------
+if [ ! -x "$TPM_DIR/bin/install_plugins" ]; then
+    warn "WARNING: $TPM_DIR exists but bin/install_plugins is missing or not executable."
+    warn "  TPM looks half-installed. Reinstall by hand (chezmoi apply will not rerun this):"
+    warn "    rm -rf $TPM_DIR && git clone --depth=1 $TPM_URL $TPM_DIR && \"$TPM_DIR/bin/install_plugins\" && $RESURRECT_LINK"
+    exit 0
+fi
+
+say "installing declared plugins via TPM (this also reaches github.com)…"
+log="$(mktemp "${TMPDIR:-/tmp}/install-tpm.XXXXXX")"
+rc=0
+"$TPM_DIR/bin/install_plugins" >"$log" 2>&1 || rc=$?
+cat "$log"
+
+if [ "$rc" -ne 0 ]; then
+    warn "WARNING: TPM install_plugins exited $rc — plugins are NOT fully installed."
+    warn "  the clone succeeded; this is a plugin-install failure, not a network-reachability one."
+    warn "  retry by hand: \"$TPM_DIR/bin/install_plugins\" && $RESURRECT_LINK"
+elif grep -qi 'download fail' "$log"; then
+    warn "WARNING: TPM exited 0 but at least one plugin FAILED to download (see above)."
+    warn "  this is a partial install reporting success — treat it as a failure."
+    warn "  retry by hand: \"$TPM_DIR/bin/install_plugins\" && $RESURRECT_LINK"
+else
+    say "plugins installed."
+fi
+rm -f "$log"
+exit 0

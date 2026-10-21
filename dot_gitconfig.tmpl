@@ -1,0 +1,73 @@
+# ~/.gitconfig — managed by chezmoi (source: dot_gitconfig.tmpl).
+#
+# Scope: tool integration (delta, absorb) and reading-experience defaults.
+# User identity (user.name, user.email) intentionally stays per-repo — this
+# machine may autogenerate `<user>@<hostname>.local` locally, and project repos
+# often want distinct identities anyway.
+#
+# Override locally with `git config ...` — per-repo and --local always win.
+#
+# Machine-local settings — identity, a corporate CA (http.sslCAInfo), proxy —
+# go in ~/.config/git/local, which this file includes LAST so it wins and which
+# chezmoi never touches. Applying replaces ~/.gitconfig as a whole file, so move
+# anything machine-specific out of it before the first apply.
+
+[core]
+    pager = delta
+
+[interactive]
+    diffFilter = delta --color-only
+
+[delta]
+    # syntax-theme=ansi inherits the terminal palette so Flexoki light/dark
+    # auto-flip in wezterm keeps diff syntax colors in sync with the rest of
+    # the terminal. Flexoki accent hex codes below (blue #4385BE, orange
+    # #DA702C, green #879A39, red #D14D41) were chosen by Flexoki to work in
+    # both modes, so no split dark/light feature block is needed.
+    syntax-theme = ansi
+    navigate = true
+    line-numbers = true
+    side-by-side = false
+    hyperlinks = true
+    keep-plus-minus-markers = true
+
+    plus-style  = "syntax"
+    minus-style = "syntax dim"
+    plus-emph-style  = "syntax bold #879A39"
+    minus-emph-style = "syntax bold #D14D41"
+
+    line-numbers-plus-style  = "#879A39 bold"
+    line-numbers-minus-style = "#D14D41 bold"
+    line-numbers-zero-style  = "#575653"
+
+    hunk-header-style            = "bold #DA702C"
+    hunk-header-decoration-style = "#DA702C ul"
+
+    file-style            = "bold #4385BE"
+    file-decoration-style = "#4385BE ul"
+
+[merge]
+    conflictstyle = zdiff3
+
+[diff]
+    colorMoved = default
+    algorithm = histogram
+    mnemonicPrefix = true
+
+[pull]
+    rebase = true
+
+[rebase]
+    autoStash = true
+    autoSquash = true
+
+[init]
+    defaultBranch = main
+
+[alias]
+    absorb = "!git-absorb"
+
+# Last, so machine-local settings override everything above. A missing file is
+# ignored by git.
+[include]
+    path = ~/.config/git/local

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# chezmoi modify_ script for ~/.config/git/ignore, git's global excludes file
+# (the XDG default; no core.excludesFile needed).
+#
+# Appends the patterns below if they are missing and leaves every other line
+# alone, so an ignore file the machine already has survives apply. This
+# replaces a whole-file dot_config/git/ignore (claude-dotfiles-abx), which
+# would have overwritten a new machine's existing excludes; the two could not
+# coexist because they name the same target.
+#
+#   **/.claude/settings.local.json, **/.claude/.cc-writes/
+#       Claude Code per-machine state.
+#   .claude-logs/
+#       Per-repo session logs from before 2026-09-28, when the logger moved to
+#       ~/.local/state/claude-logs/ (claude-dotfiles-abx). A machine that ran
+#       the old logger can still have them, and they hold full tool I/O. A
+#       fresh machine never has any; this is a backstop.
+#   .direnv/
+#       direnv's per-repo cache. agent-core/direnv/python-venv.envrc no longer
+#       writes here, but `layout` helpers and older copies of that envrc built
+#       a whole venv under .direnv/python-X.Y, which must never be committed.
+set -euo pipefail
+content=$(cat)
+printf '%s' "$content"
+[ -n "$content" ] && [ "${content: -1}" != $'\n' ] && printf '\n'
+for pat in '**/.claude/settings.local.json' '**/.claude/.cc-writes/' '.claude-logs/' '.direnv/'; do
+    printf '%s\n' "$content" | grep -qxF -- "$pat" || printf '%s\n' "$pat"
+done

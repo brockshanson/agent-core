@@ -1,0 +1,22 @@
+# Portable Codex execpolicy rules.
+#
+# Codex loads EVERY *.rules file in ~/.codex/rules/ (verified empirically
+# against codex-cli 0.149.1: an invalid second file in that directory produced
+# "Error loading rules: .../zz-probe.rules:1: starlark error"). So machine-
+# specific approvals belong in a sibling file rather than in this one, and
+# Codex's own runtime appends survive a chezmoi apply, because this is a
+# symlink, not a generated file.
+#
+# Keep this file free of absolute home paths, personal handles, and
+# machine-specific tool names.
+#
+# Only read-only terminal commands are pre-approved here. Bare `tmux`,
+# `wezterm cli` and `pkill -f` used to be: tmux new-window/run-shell/send-keys
+# and wezterm cli spawn/send-text run arbitrary commands, in another process
+# and likely outside Codex's sandbox, without a prompt (portable-core red team,
+# 2026-09-29).
+prefix_rule(pattern=["tmux", "list-panes"], decision="allow")
+prefix_rule(pattern=["tmux", "list-windows"], decision="allow")
+prefix_rule(pattern=["tmux", "capture-pane"], decision="allow")
+prefix_rule(pattern=["tmux", "display-message"], decision="allow")
+prefix_rule(pattern=["git", "cherry-pick"], decision="allow")
